@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/external"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -43,7 +44,7 @@ type ClusterAPIClusterInventoryReconciler struct {
 }
 
 //+kubebuilder:rbac:groups=cluster.x-k8s.io;controlplane.cluster.x-k8s.io,resources=*,verbs=get;list;watch
-//+kubebuilder:rbac:groups=multicluster.x-k8s.io.multicluster.x-k8s.io,resources=inventoryclusters/status;inventoryclusters,verbs=get;list;watch;create;patch;delete
+//+kubebuilder:rbac:groups=multicluster.x-k8s.io.multicluster.x-k8s.io,resources=inventoryclusters/status;inventoryclusters,verbs=get;list;watch;create;update;patch;delete
 
 func (r *ClusterAPIClusterInventoryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
@@ -70,33 +71,70 @@ func (r *ClusterAPIClusterInventoryReconciler) Reconcile(ctx context.Context, re
 		}
 	}
 
-	ic := &inventoryv1.InventoryCluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cluster.Name,
-			Namespace: cluster.Namespace,
+	icList := &inventoryv1.InventoryClusterList{}
+	err = r.List(ctx, icList,
+		client.InNamespace(cluster.Namespace),
+		client.MatchingLabels{
+			clusterv1.ClusterNameLabel: cluster.Name,
 		},
-		Spec: inventoryv1.InventoryClusterSpec{
-			DisplayName: cluster.Name,
-			ClusterManager: inventoryv1.ClusterManager{
-				Name: "cluster-api",
-			},
-		},
-		Status: inventoryv1.InventoryClusterStatus{
-			Version: controlPlaneVersion,
-		},
-	}
-	ic.SetGroupVersionKind(inventoryv1.GroupVersion.WithKind("InventoryCluster"))
-
-	if err := controllerutil.SetControllerReference(cluster, ic, r.Client.Scheme()); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	log.Info("applying inventory cluster", "inventoryCluster", ic)
-	err = r.Patch(ctx, ic.DeepCopy(), client.Apply, client.FieldOwner("capi-cluster-inventory"))
+	)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	err = r.Status().Patch(ctx, ic, client.Apply, client.FieldOwner("capi-cluster-inventory"))
+
+	var inventoryCluster *inventoryv1.InventoryCluster
+	for _, ic := range icList.Items {
+		for _, owner := range ic.OwnerReferences {
+			if owner.APIVersion == cluster.APIVersion &&
+				owner.Kind == cluster.Kind &&
+				owner.Name == cluster.Name {
+				inventoryCluster = ptr.To(ic)
+				break
+			}
+		}
+	}
+
+	create := false
+	if inventoryCluster == nil {
+		create = true
+		inventoryCluster = &inventoryv1.InventoryCluster{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "cluster-api-" + cluster.Name + "-",
+				Namespace:    cluster.Namespace,
+			},
+		}
+	}
+
+	if err := controllerutil.SetControllerReference(cluster, inventoryCluster, r.Client.Scheme()); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if inventoryCluster.Labels == nil {
+		inventoryCluster.Labels = make(map[string]string)
+	}
+	inventoryCluster.Labels[clusterv1.ClusterNameLabel] = cluster.Name
+
+	inventoryCluster.Spec = inventoryv1.InventoryClusterSpec{
+		DisplayName: cluster.Name,
+		ClusterManager: inventoryv1.ClusterManager{
+			Name: "cluster-api",
+		},
+	}
+
+	if create {
+		log.Info("creating inventory cluster", "inventoryCluster", inventoryCluster)
+		err = r.Create(ctx, inventoryCluster)
+	} else {
+		log.Info("updating inventory cluster", "inventoryCluster", inventoryCluster)
+		err = r.Update(ctx, inventoryCluster)
+	}
+
+	inventoryCluster.Status = inventoryv1.InventoryClusterStatus{
+		Version: controlPlaneVersion,
+	}
+	if err == nil {
+		err = r.Status().Update(ctx, inventoryCluster)
+	}
 	return ctrl.Result{}, err
 }
 
