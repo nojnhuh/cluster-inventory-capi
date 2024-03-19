@@ -7,4 +7,9 @@ layout:
 - go.kubebuilder.io/v4
 projectName: cluster-inventory-capi
 repo: github.com/nojnhuh/cluster-inventory-capi
+resources:
+- controller: true
+  domain: x-k8s.io
+  kind: ClusterAPIClusterInventory
+  version: v1alpha1
 version: "3"
