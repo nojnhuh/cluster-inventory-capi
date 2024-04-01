@@ -1,8 +1,6 @@
 # cluster-inventory-capi
-// TODO(user): Add simple overview of use/purpose
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+Cluster Inventory CAPI is a simple controller that manages [InventoryClusters](https://github.com/kubernetes/enhancements/blob/master/keps/sig-multicluster/4322-cluster-inventory/README.md) backed by [Cluster API](https://cluster-api.sigs.k8s.io/) Clusters.
 
 ## Getting Started
 
