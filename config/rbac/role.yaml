@@ -24,4 +24,5 @@ rules:
   - get
   - list
   - patch
+  - update
   - watch
